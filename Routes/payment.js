@@ -13,40 +13,88 @@ router.post('/payment',async(req,res)=>{
     const decodedToken = jwt.decode(token);
     const {Email}=decodedToken;
 
-    const productID = productData[index][plan];
-
-    const customer = await stripe.customers.create({
-        payment_method: paymentMethodId,
-        email: Email,
-        invoice_settings: {
-          default_payment_method: paymentMethodId,
-        },
-      });
-
-    const subscription = await stripe.subscriptions.create({
-    customer: customer.id,
-    items: [{ price: productID }],
-    payment_settings: {
-        payment_method_types: ["card"],
-        save_default_payment_method: "on_subscription",
-    },
-    expand: ["latest_invoice.payment_intent"],
-    });
-
-    const subscriptionId = subscription.id;
-    console.log(subscriptionId);
-
-    const updateQuery = `UPDATE user SET Subscription = '${subscriptionId}' WHERE Email = '${Email}'`;
-      database.query(updateQuery, function (err) {
+    database.query('SELECT * FROM user WHERE Email = ?', [Email], async function (err, rows) {
         if (err) {
+            
           return res.status(500).json({ message: 'Database error' });
         }
-        
-        res.status(200).json({
-            message: "Subscription successfully initiated",
-            clientSecret: subscription.latest_invoice.payment_intent.client_secret,
-          });
-      });
+        if(rows[0].Subscription.length!==0)
+        {
+            const subscriptionId=rows[0].Subscription;
+            stripe.subscriptions.del(subscriptionId).then(async(sub)=>{
+                await sub;
+                    const productID = productData[index][plan];
+
+                    const customer = await stripe.customers.create({
+                        payment_method: paymentMethodId,
+                        email: Email,
+                        invoice_settings: {
+                        default_payment_method: paymentMethodId,
+                        },
+                    });
+
+                    const subscription = await stripe.subscriptions.create({
+                    customer: customer.id,
+                    items: [{ price: productID }],
+                    payment_settings: {
+                        payment_method_types: ["card"],
+                        save_default_payment_method: "on_subscription",
+                    },
+                    expand: ["latest_invoice.payment_intent"],
+                    });
+
+                    const subscriptionId = subscription.id;
+
+                    const updateQuery = `UPDATE user SET Subscription = '${subscriptionId}' WHERE Email = '${Email}'`;
+                    database.query(updateQuery, function (err) {
+                        if (err) {
+                        return res.status(500).json({ message: 'Database error' });
+                        }
+                        
+                        res.status(200).json({
+                            message: "Subscription successfully initiated",
+                            clientSecret: subscription.latest_invoice.payment_intent.client_secret,
+                        });
+                    });
+                });
+        }
+        else
+        {
+            const productID = productData[index][plan];
+                    
+                const customer = await stripe.customers.create({
+                    payment_method: paymentMethodId,
+                    email: Email,
+                    invoice_settings: {
+                    default_payment_method: paymentMethodId,
+                    },
+                });
+
+                const subscription = await stripe.subscriptions.create({
+                customer: customer.id,
+                items: [{ price: productID }],
+                payment_settings: {
+                payment_method_types: ["card"],
+                save_default_payment_method: "on_subscription",
+                },
+                expand: ["latest_invoice.payment_intent"],
+                });
+
+                const subscriptionId = subscription.id;
+
+                const updateQuery = `UPDATE user SET Subscription = '${subscriptionId}' WHERE Email = '${Email}'`;
+                database.query(updateQuery, function (err) {
+                if (err) {
+                return res.status(500).json({ message: 'Database error' });
+                }
+                        
+                res.status(200).json({
+                    message: "Subscription successfully initiated",
+                    clientSecret: subscription.latest_invoice.payment_intent.client_secret,
+                });
+            });
+        }
+    })
 });
 
 router.post('/cancelSubscription',async (req,res)=>{
@@ -55,23 +103,22 @@ router.post('/cancelSubscription',async (req,res)=>{
     const {Email}=decodedToken;
     database.query('SELECT * FROM user WHERE Email = ?', [Email], async function (err, rows) {
         if (err) {
+            
           return res.status(500).json({ message: 'Database error' });
         }
         const subscriptionId=rows[0].Subscription;
-        
-        async function cancelSubscription(subscriptionId) {
-            try {
-                const canceledSubscription = await stripe.subscriptions.del(subscriptionId);
-        
-                return canceledSubscription;
-            } catch (error) {
-                console.error('Error canceling subscription:', error);
-                throw error;
-            }
-        }
-        
-        const canceledSubscription = await cancelSubscription(subscriptionId);
-        res.status(200).json({message:"subscription cancelled"});
+        stripe.subscriptions.del(subscriptionId).then(async(subscription)=>{
+            await subscription;
+            database.query(`UPDATE user SET Subscription = NULL WHERE Email = '${Email}'`, async function (err, rows) {
+                if (err) {
+                    
+                  return res.status(500).json({ message: 'Database error' });
+                }
+                res.status(200).json({message:"subscription cancelled"});
+            });
+        }).catch(err=>{
+            res.status(500).json({ message:'Database Error' });
+        });
     }) 
 })
 
@@ -82,7 +129,7 @@ router.post('/getSubscription',(req,res)=>{
     const {Email}=decodedToken;
     database.query('SELECT * FROM user WHERE Email = ?', [Email], function (err, rows) {
         if (err) {
-          return res.status(500).json({ message: 'Database error' });
+          return res.status(500).json({ message: 'Database error occured' });
         }
         const subscriptionId=rows[0].Subscription;
         async function getSubscriptionDetails(subscriptionId) {
@@ -94,15 +141,12 @@ router.post('/getSubscription',(req,res)=>{
                 const product = await stripe.products.retrieve(productId);
                 database.query('SELECT * FROM plans WHERE `Plan Name` = ?', [product.name], function (err, rows) {
                     if (err) {
-                        return res.status(500).json({ message: 'Database error' });
+                        return res.status(500).json({ message: 'Database error occured' });
                       }
                     res.status(200).json(rows[0]);
                 });
-                console.log('Subscription Details:', {
-                product,
-                });
             } catch (error) {
-                console.error('Error fetching subscription details:', error);
+                res.status(500).json({message:'Some error occured'});
             }
         }
         getSubscriptionDetails(subscriptionId);

@@ -9,7 +9,6 @@ const e=process.env;
 const secretKey = e.SECRETKEY;
 
 router.post('/register', (req, res) => {
-    console.log('register run');
     const { email, password, name } = req.body;
   
     database.query('SELECT * FROM user WHERE Email = ?', [email], function (err, rows) {
